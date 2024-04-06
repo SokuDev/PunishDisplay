@@ -29,6 +29,17 @@ static std::pair<unsigned, unsigned> displayCounter = {1000, 1000};
 
 SokuLib::DrawUtils::Sprite* associatePunishSprite(SokuLib::CharacterManager &character)
 {
+	if (SokuLib::subMode != SokuLib::BattleSubMode::BATTLE_SUBMODE_REPLAY)
+	{
+		switch(SokuLib::mainMode)
+		{
+			case SokuLib::BattleMode::BATTLE_MODE_VSPLAYER:
+			case SokuLib::BattleMode::BATTLE_MODE_VSSERVER:
+			case SokuLib::BattleMode::BATTLE_MODE_VSCLIENT:
+				return &punish;
+		}
+	}
+
 	if ((character.objectBase.action >= SokuLib::ACTION_NEUTRAL_HIGH_JUMP && character.objectBase.action <= SokuLib::ACTION_FORWARD_HIGH_JUMP_FROM_GROUND_DASH)
 	    || (character.objectBase.action >= SokuLib::ACTION_NEUTRAL_JUMP && character.objectBase.action <= SokuLib::ACTION_BACKWARD_JUMP))
 	{
