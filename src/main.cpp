@@ -1,34 +1,104 @@
 //
-// Created by PinkySmile on 31/10/2020
+// Created by PinkySmile on 01/08/2021.
+// Edited by PC_volt
 //
 
 #include <SokuLib.hpp>
+#include <dinput.h>
+#include <fstream>
+static void (SokuLib::BattleManager::*og_BattleManagerOnRender)();
+static int (SokuLib::BattleManager::*og_BattleManagerOnProcess)();
+static int (SokuLib::CharacterManager::*original_onHit)(int param);
+#ifndef _DEBUG
+#define puts(...)
+#define printf(...)
 
-static bool init = false;
-static int (SokuLib::BattleManager::*ogBattleMgrOnProcess)();
-static void (SokuLib::BattleManager::*ogBattleMgrOnRender)();
-static SokuLib::DrawUtils::Sprite text;
+#endif
+
+static bool loaded = false;
+static SokuLib::DrawUtils::Sprite bePunish;
+static SokuLib::DrawUtils::Sprite jumpPunish;
+static SokuLib::DrawUtils::Sprite dashPunish;
+static SokuLib::DrawUtils::Sprite attackPunish;
+static SokuLib::DrawUtils::Sprite punish;
+
 static SokuLib::SWRFont font;
+static SokuLib::DrawUtils::Sprite* punishTextP1;
+static SokuLib::DrawUtils::Sprite* punishTextP2;
+static std::pair<unsigned, unsigned> displayCounter = {1000, 1000};
 
-int __fastcall CBattleManager_OnRender(SokuLib::BattleManager *This)
+SokuLib::DrawUtils::Sprite* associatePunishSprite(SokuLib::CharacterManager &character)
 {
-	(This->*ogBattleMgrOnRender)();
-	text.draw();
-	return 0;
+	if ((character.objectBase.action >= SokuLib::ACTION_NEUTRAL_HIGH_JUMP && character.objectBase.action <= SokuLib::ACTION_FORWARD_HIGH_JUMP_FROM_GROUND_DASH)
+	    || (character.objectBase.action >= SokuLib::ACTION_NEUTRAL_JUMP && character.objectBase.action <= SokuLib::ACTION_BACKWARD_JUMP))
+	{
+		return &jumpPunish;
+	}
+	else if (character.objectBase.action >= SokuLib::ACTION_FORWARD_DASH && character.objectBase.action <= SokuLib::ACTION_LILYPAD_BACKDASH)
+	{
+		return &dashPunish;
+	}
+	else if (character.objectBase.action >= SokuLib::ACTION_BE2 && character.objectBase.action <= SokuLib::ACTION_jBE6)
+	{
+		return &bePunish;
+	}
+	else if (character.objectBase.action >= SokuLib::ACTION_5A)
+	{
+		return &attackPunish;
+	}
+	else
+	{
+		return &punish;
+	}
 }
 
-void loadFont()
+int __fastcall isHit(SokuLib::CharacterManager &character, int, int param)
 {
+	if (!character.objectBase.frameData->frameFlags.guardAvailable &&
+	    (character.objectBase.action < SokuLib::ACTION_STAND_GROUND_HIT_SMALL_HITSTUN ||
+	     character.objectBase.action > SokuLib::ACTION_NEUTRAL_TECH))
+	{
+		if (&character == &SokuLib::getBattleMgr().leftCharacterManager)
+		{
+			punishTextP1 = associatePunishSprite(character);
+			displayCounter.first = 0;
+		}
+		else if (&character == &SokuLib::getBattleMgr().rightCharacterManager)
+		{
+			punishTextP2 = associatePunishSprite(character);
+			displayCounter.second = 0;
+		}
+	}
+
+	return (character.*original_onHit)(param);
+}
+
+void createPunishTextSprite(SokuLib::DrawUtils::Sprite &punishText, char* punishMessage)
+{
+	SokuLib::Vector2<int> realSize;
+	if (!punishText.texture.createFromText(punishMessage, font, {0x1000, 50}, &realSize))
+	{
+		puts("Create from text failed");
+	}
+	punishText.setSize(realSize.to<unsigned>());
+	punishText.rect.width = realSize.x;
+	punishText.rect.height = realSize.y;
+}
+
+void createSprites()
+{
+	if (loaded)
+		return;
+
+	loaded = true;
 	SokuLib::FontDescription desc;
 
-	// Pink
 	desc.r1 = 255;
-	desc.g1 = 155;
-	desc.b1 = 155;
-	// Light green
-	desc.r2 = 155;
+	desc.r2 = 255;
+	desc.g1 = 255;
 	desc.g2 = 255;
-	desc.b2 = 155;
+	desc.b1 = 255;
+	desc.b2 = 255;
 	desc.height = 24;
 	desc.weight = FW_BOLD;
 	desc.italic = 0;
@@ -42,33 +112,51 @@ void loadFont()
 	strcpy(desc.faceName, "MonoSpatialModSWR");
 	font.create();
 	font.setIndirect(desc);
+
+	createPunishTextSprite(jumpPunish, "Jump Punish!");
+	createPunishTextSprite(bePunish, "BE Punish!");
+	createPunishTextSprite(dashPunish, "Dash Punish!");
+	createPunishTextSprite(attackPunish, "Attack Punish!");
+	createPunishTextSprite(punish, "Punish!");
 }
 
-int __fastcall CBattleManager_OnProcess(SokuLib::BattleManager *This)
+int __fastcall BattleOnProcess(SokuLib::BattleManager *This)
 {
-	if (!init) {
-		SokuLib::Vector2i realSize;
+	int ret = (This->*og_BattleManagerOnProcess)();
 
-		loadFont();
-		text.texture.createFromText("Hello, world!", font, {300, 300}, &realSize);
-		text.setPosition(SokuLib::Vector2i{320 - realSize.x / 2, 240 - realSize.y / 2});
-		text.setSize(realSize.to<unsigned>());
-		text.rect.width = realSize.x;
-		text.rect.height = realSize.y;
-		init = true;
+	createSprites();
+	return ret;
+}
+
+void __fastcall BattleOnRender(SokuLib::BattleManager *This)
+{
+	(This->*og_BattleManagerOnRender)();
+
+	if (displayCounter.first < 1000)
+		displayCounter.first++;
+	if (displayCounter.second < 1000)
+		displayCounter.second++;
+
+	if (displayCounter.first < 1000)
+	{
+		punishTextP1->setPosition({17, 67});
+		punishTextP1->tint.a = min(255, max(0, (240 - static_cast<int>(displayCounter.first * 4) + 255)));
+		punishTextP1->draw();
 	}
-	text.setRotation(text.getRotation() + 0.01f);
-	return (This->*ogBattleMgrOnProcess)();
+
+	if (displayCounter.second < 1000)
+	{
+		int xPosMessageP2 = 640 - 17 - punishTextP2->rect.width;
+		punishTextP2->setPosition({xPosMessageP2, 67});
+		punishTextP2->tint.a = min(255, max(0, (240 - static_cast<int>(displayCounter.second * 4) + 255)));
+		punishTextP2->draw();
+	}
 }
 
-// We check if the game version is what we target (in our case, Soku 1.10a).
-extern "C" __declspec(dllexport) bool CheckVersion(const BYTE hash[16])
-{
-	return memcmp(hash, SokuLib::targetHash, sizeof(SokuLib::targetHash)) == 0;
+extern "C" __declspec(dllexport) bool CheckVersion(const BYTE hash[16]) {
+	return memcmp(hash, SokuLib::targetHash, 16) == 0;
 }
 
-// Called when the mod loader is ready to initialize this module.
-// All hooks should be placed here. It's also a good moment to load settings from the ini.
 extern "C" __declspec(dllexport) bool Initialize(HMODULE hMyModule, HMODULE hParentModule)
 {
 	DWORD old;
@@ -81,11 +169,14 @@ extern "C" __declspec(dllexport) bool Initialize(HMODULE hMyModule, HMODULE hPar
 	freopen_s(&_, "CONOUT$", "w", stderr);
 #endif
 
-	puts("Hello, world!");
 	VirtualProtect((PVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_EXECUTE_WRITECOPY, &old);
-	ogBattleMgrOnRender  = SokuLib::TamperDword(&SokuLib::VTable_BattleManager.onRender,  CBattleManager_OnRender);
-	ogBattleMgrOnProcess = SokuLib::TamperDword(&SokuLib::VTable_BattleManager.onProcess, CBattleManager_OnProcess);
+	og_BattleManagerOnProcess = SokuLib::TamperDword(&SokuLib::VTable_BattleManager.onProcess, BattleOnProcess);
+	og_BattleManagerOnRender  = SokuLib::TamperDword(&SokuLib::VTable_BattleManager.onRender,  BattleOnRender);
 	VirtualProtect((PVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, old, &old);
+
+	VirtualProtect((PVOID)TEXT_SECTION_OFFSET, TEXT_SECTION_SIZE, PAGE_EXECUTE_WRITECOPY, &old);
+	original_onHit = SokuLib::union_cast<int (SokuLib::CharacterManager::*)(int)>(SokuLib::TamperNearJmpOpr(0x47c5a9, reinterpret_cast<DWORD>(isHit)));
+	VirtualProtect((PVOID)TEXT_SECTION_OFFSET, TEXT_SECTION_SIZE, old, &old);
 
 	FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
 	return true;
@@ -95,19 +186,3 @@ extern "C" int APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReser
 {
 	return TRUE;
 }
-
-// New mod loader functions
-// Loading priority. Mods are loaded in order by ascending level of priority (the highest first).
-// When 2 mods define the same loading priority the loading order is undefined.
-extern "C" __declspec(dllexport) int getPriority()
-{
-	return 0;
-}
-
-// Not yet implemented in the mod loader, subject to change
-// SokuModLoader::IValue **getConfig();
-// void freeConfig(SokuModLoader::IValue **v);
-// bool commitConfig(SokuModLoader::IValue *);
-// const char *getFailureReason();
-// bool hasChainedHooks();
-// void unHook();
